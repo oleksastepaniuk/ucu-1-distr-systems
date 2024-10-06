@@ -1,0 +1,14 @@
+# Files
+**/*.pyc
+**/*.jpg
+**/*.csv
+**/*.log
+
+# Dirs
+__pycache__
+outputs/
+tmp/
+data/
+
+# Debugger
+launch.json
