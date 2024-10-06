@@ -6,7 +6,9 @@ channels:
   - defaults
 dependencies:
   - python=3.11.7
+  - aiohttp=3.10.5
   - fastapi=0.103.0
   - ipykernel=6.29.1
+  - pandas=2.2.2 
   - requests=2.32.2
   - uvicorn=0.30.1
