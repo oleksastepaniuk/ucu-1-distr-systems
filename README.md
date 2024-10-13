@@ -1,9 +1,24 @@
 # ucu-1-distr-systems
 Assignments from the 1st Distributed Systems course, part of UCU Data Engineering program
 
+Build images and start containers:
+```
+docker compose up --build --force-recreate
+```
+
+Send X messages to the main server, Y of them at a time
+```
+python client/client_post.py X Y
+```
+Example: `python client/client_post.py 50 12` - send 50 messages, 12 messages at a time
+
+Retrieve all the messages stored by the main server:
+```
+python client/client_get.py 
+```
 
 
-## Black code style
+### Black code style
 
 - Install dev-requirements
 ```

@@ -11,3 +11,21 @@ services:
       - ./data:/app/data
       - ./loggs:/app/loggs
     command: ["python", "server.py", "main", "main_docker_1", "8010"]
+
+  backup_server_1:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    volumes:
+      - ./data:/app/data
+      - ./loggs:/app/loggs
+    command: ["python", "server.py", "backup", "backup_server_1", "8011"]
+
+  backup_server_2:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    volumes:
+      - ./data:/app/data
+      - ./loggs:/app/loggs
+    command: ["python", "server.py", "backup", "backup_server_2", "8012"]

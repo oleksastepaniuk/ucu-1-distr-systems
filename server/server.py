@@ -56,7 +56,7 @@ async def store_message(request: Request):
     if args.server_type == "main":
         async with aiohttp.ClientSession() as session:
             for backup_name, port in backup_server_dict.items():
-                url = f"http://127.0.0.1:{port}/post_message"
+                url = f"http://{backup_name}:{port}/post_message"
                 print(f"Sending message to: {url}")
                 success, elapsed_time = await backup_message(
                     json_data["message"], session, url
