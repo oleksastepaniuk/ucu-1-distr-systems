@@ -1,5 +1,6 @@
 import argparse
 import aiohttp
+import asyncio
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
 import uuid
@@ -9,6 +10,8 @@ import csv
 import json
 import pandas as pd
 import sys
+import time
+import random
 
 sys.path.append("./")
 from utils.log_func import init_logger
@@ -22,17 +25,20 @@ async def backup_message(
     url: str = "http://127.0.0.1:8010/post_message",
 ) -> None:
     try:
+        start_time = time.time()
         async with session.post(url, json={"message": message}) as response:
+            elapsed_time = time.time() - start_time
             if response.status == 200:
-                return True
+                return True, elapsed_time
             else:
                 print(
                     f"Failed to post message: {message}. Response status {response.status}"
                 )
-                return False
+                return False, elapsed_time
     except aiohttp.ClientError as e:
+        elapsed_time = time.time() - start_time
         print(f"Failed to connect. Message {message}, error - {e}")
-        return False
+        return False, elapsed_time
 
 
 @app.post("/post_message")
@@ -48,8 +54,25 @@ async def store_message(request: Request):
         writer.writerow(log_entry)
 
     if args.server_type == "main":
-        for backup_name, port in backup_server_dict.items():
-            print(f"Sending message to: http://127.0.0.1:{port}/post_message")
+        async with aiohttp.ClientSession() as session:
+            for backup_name, port in backup_server_dict.items():
+                url = f"http://127.0.0.1:{port}/post_message"
+                print(f"Sending message to: {url}")
+                success, elapsed_time = await backup_message(
+                    json_data["message"], session, url
+                )
+                if success:
+                    logger.info(
+                        f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+                    )
+                else:
+                    logger.error(
+                        f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+                    )
+
+    elif args.server_type == "backup":
+        sleep_time = random.uniform(0, 5)
+        await asyncio.sleep(sleep_time)
 
     return {"message": "Data received"}
 
@@ -89,11 +112,13 @@ if __name__ == "__main__":
     logger = init_logger(args.server_name, "loggs")
 
     if args.server_type == "main":
-        with open("./server/backup_servers.json", "r") as f:
+        with open("backup_servers.json", "r") as f:
             backup_server_dict = json.load(f)
         print(f"Starting main server '{args.server_name}' at port {args.port}")
         print(
             f"{len(backup_server_dict)} backup servers will be used. Ports: {list(backup_server_dict.values())}\n"
         )
+    elif args.server_type == "backup":
+        print(f"Starting backup server '{args.server_name}' at port {args.port}\n")
 
     uvicorn.run(app, host="0.0.0.0", port=args.port)

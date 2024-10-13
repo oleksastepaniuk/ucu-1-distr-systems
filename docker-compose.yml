@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  main_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.main
+    ports:
+      - "8010:8010"
+    volumes:
+      - ./data:/app/data
+      - ./loggs:/app/loggs
+    command: ["python", "server.py", "main", "main_docker_1", "8010"]

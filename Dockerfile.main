@@ -1,0 +1,9 @@
+FROM python:3.11-slim-bookworm
+WORKDIR /app
+COPY requirements.txt /app
+RUN pip install --no-cache-dir -r requirements.txt
+COPY server/server.py /app/
+COPY utils/ /app/utils
+COPY backup_servers.json /app/
+EXPOSE 8010
+CMD ["python", "server.py", "main", "main_docker_1", "8010"]
