@@ -6,9 +6,9 @@ Build images and start containers:
 docker compose up --build --force-recreate
 ```
 
-Send X messages to the main server, Y of them at a time
+Send X messages to the main server, Y of them at a time, use Z write concern
 ```
-python client/client_post.py X Y
+python client/client_post.py X Y Z
 ```
 Example: `python client/client_post.py 50 12` - send 50 messages, 12 messages at a time
 

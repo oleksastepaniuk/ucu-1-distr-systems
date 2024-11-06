@@ -46,7 +46,10 @@ async def store_message(request: Request):
     json_data = await request.json()
     request_id = str(uuid.uuid4())
 
-    logger.info(f"[{request_id}] - POST request: {json_data['message']}")
+    logg_message = f"[{request_id}] - POST request: {json_data['message']}"
+    if args.server_type == "main":
+        logg_message += f" Write concern: {json_data['write_concern']}"
+    logger.info(logg_message)
 
     log_entry = [request_id, datetime.now().isoformat(), json_data["message"]]
     with open(data_file, "a", newline="") as f:

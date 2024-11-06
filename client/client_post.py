@@ -9,9 +9,12 @@ async def post_message(
     message: str,
     session: aiohttp.ClientSession,
     url: str = "http://127.0.0.1:8010/post_message",
+    write_concern: int = 1,
 ) -> None:
     try:
-        async with session.post(url, json={"message": message}) as response:
+        async with session.post(
+            url, json={"message": message, "write_concern": write_concern}
+        ) as response:
             if response.status == 200:
                 return True
             else:
@@ -24,10 +27,12 @@ async def post_message(
         return False
 
 
-async def send_messages_concurrently(messages: List, url: str, concurrency: int) -> int:
+async def send_messages_concurrently(
+    messages: List, url: str, concurrency: int, write_concern: int
+) -> int:
     connector = aiohttp.TCPConnector(limit=concurrency)
     async with aiohttp.ClientSession(connector=connector) as session:
-        tasks = [post_message(m, session, url) for m in messages]
+        tasks = [post_message(m, session, url, write_concern) for m in messages]
         results = await asyncio.gather(*tasks)
 
     success_count = sum(results)
@@ -42,6 +47,11 @@ if __name__ == "__main__":
         "message_number", type=int, help="Number of of messages to send"
     )
     parser.add_argument("concurrency", type=int, help="Number of simultaneous requests")
+    parser.add_argument(
+        "write_concern",
+        type=int,
+        help="Number of ACKs the master should receive from secondaries before responding to the client",
+    )
     args = parser.parse_args()
 
     url = "http://127.0.0.1:8010/post_message"
@@ -50,9 +60,9 @@ if __name__ == "__main__":
     ]
 
     success_count = asyncio.run(
-        send_messages_concurrently(messages, url, args.concurrency)
+        send_messages_concurrently(messages, url, args.concurrency, args.write_concern)
     )
 
     print(
-        f"Sent {args.message_number} messages with {success_count} successes.\n{args.concurrency} simultaneous messages at a time."
+        f"Write concern {args.write_concern}.\nSent {args.message_number} messages with {success_count} successes.\n{args.concurrency} simultaneous messages at a time."
     )
