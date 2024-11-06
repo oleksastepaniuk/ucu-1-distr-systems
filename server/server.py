@@ -48,7 +48,8 @@ async def store_message(request: Request):
 
     logg_message = f"[{request_id}] - POST request: {json_data['message']}"
     if args.server_type == "main":
-        logg_message += f" Write concern: {json_data['write_concern']}"
+        write_concern = int(json_data.get("write_concern", 1))
+        logg_message += f" Write concern: {write_concern}"
     logger.info(logg_message)
 
     log_entry = [request_id, datetime.now().isoformat(), json_data["message"]]
@@ -57,6 +58,12 @@ async def store_message(request: Request):
         writer.writerow(log_entry)
 
     if args.server_type == "main":
+        # check if write concern can be satisfied
+        if write_concern - 1 > len(backup_server_dict):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Too many backups required. Requested {write_concern}, available: {len(backup_server_dict) + 1}",
+            )
         async with aiohttp.ClientSession() as session:
             for backup_name, port in backup_server_dict.items():
                 url = f"http://{backup_name}:{port}/post_message"

@@ -18,8 +18,10 @@ async def post_message(
             if response.status == 200:
                 return True
             else:
+                error_data = await response.json()  # Parse the response as JSON
+                error_detail = error_data.get("detail", "")
                 print(
-                    f"Failed to post message: {message}. Response status {response.status}"
+                    f"Failed to post message: {message}. Response status {response.status}: {error_detail}"
                 )
                 return False
     except aiohttp.ClientError as e:
