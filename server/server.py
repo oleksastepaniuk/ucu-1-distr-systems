@@ -10,9 +10,9 @@ import csv
 import json
 import pandas as pd
 import sys
-import time
+from time import time
 import random
-from typing import Tuple
+from typing import Tuple, Dict
 
 sys.path.append("./")
 from utils.log_func import init_logger
@@ -28,12 +28,12 @@ async def backup_message(
     request_id: str = "default_id",
 ) -> Tuple[bool, float, str, int, str]:
     try:
-        start_time = time.time()
+        start_time = time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
                 url, json={"message": message, "request_id": request_id}
             ) as response:
-                elapsed_time = time.time() - start_time
+                elapsed_time = time() - start_time
                 if response.status == 200:
                     return True, elapsed_time, backup_name, port, request_id
                 else:
@@ -42,12 +42,12 @@ async def backup_message(
                     )
                     return False, elapsed_time, backup_name, port, request_id
     except aiohttp.ClientError as e:
-        elapsed_time = time.time() - start_time
+        elapsed_time = time() - start_time
         print(f"Failed to connect. Message {message}, error - {e}")
         return False, elapsed_time, backup_name, port, request_id
 
 
-def on_task_done(task):
+def on_task_done(task: asyncio.Task) -> None:
     try:
         success, elapsed_time, backup_name, port, request_id = task.result()
 
@@ -66,7 +66,7 @@ def on_task_done(task):
 
 
 @app.post("/post_message")
-async def store_message(request: Request):
+async def store_message(request: Request) -> Dict:
     json_data = await request.json()
     request_id = json_data.get("request_id", str(uuid.uuid4()))
     message = json_data["message"]
@@ -133,7 +133,7 @@ async def store_message(request: Request):
 
 
 @app.get("/get_messages")
-async def reurn_messages():
+async def reurn_messages() -> Dict:
     if os.path.isfile(data_file):
         messages_df = pd.read_csv(data_file)
         return {"messages": messages_df["Message"].to_list()}
