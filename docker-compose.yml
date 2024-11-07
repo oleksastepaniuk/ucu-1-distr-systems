@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.main
+    environment:
+      - TZ=Europe/Kyiv
     ports:
       - "8010:8010"
     volumes:
@@ -16,6 +18,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backup
+    environment:
+      - TZ=Europe/Kyiv
     volumes:
       - ./data:/app/data
       - ./loggs:/app/loggs
