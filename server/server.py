@@ -29,12 +29,18 @@ async def backup_message(
     backup_name: str = "backup_server_1",
     port: int = 8011,
     request_id: str = "default_id",
+    main_server_time: float = 0,
 ) -> Tuple[bool, float, str, int, str]:
     try:
         start_time = time()
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                url, json={"message": message, "request_id": request_id}
+                url,
+                json={
+                    "message": message,
+                    "request_id": request_id,
+                    "main_server_time": main_server_time,
+                },
             ) as response:
                 elapsed_time = time() - start_time
                 if response.status == 200:
@@ -87,6 +93,7 @@ async def store_message(request: Request) -> Dict[str, str]:
     request_id = json_data.get("request_id", str(uuid.uuid4()))
     message = json_data["message"]
     write_concern = int(json_data.get("write_concern", 1))
+    main_server_time = json_data.get("main_server_time", datetime.now().timestamp())
 
     log_message = (
         f"[{request_id}] - POST request: {message}; Write concern: {write_concern}"
@@ -97,7 +104,7 @@ async def store_message(request: Request) -> Dict[str, str]:
         logger.info(f"[{request_id}] - Duplicate request received. Ignoring.")
         return {"message": "Duplicate message ignored."}
     else:
-        data_entry = [request_id, datetime.now().isoformat(), message]
+        data_entry = [request_id, datetime.now().isoformat(), main_server_time, message]
         with open(data_file, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(data_entry)
@@ -113,7 +120,9 @@ async def store_message(request: Request) -> Dict[str, str]:
             url = f"http://{backup_name}:{port}/post_message"
             print(f"Sending message to: {url}")
             task = asyncio.create_task(
-                backup_message(message, url, backup_name, port, request_id)
+                backup_message(
+                    message, url, backup_name, port, request_id, main_server_time
+                )
             )
             backup_tasks.append(task)
             task.add_done_callback(on_task_done)
@@ -149,6 +158,7 @@ async def store_message(request: Request) -> Dict[str, str]:
 async def reurn_messages() -> Dict[str, List[str]]:
     if os.path.isfile(data_file):
         messages_df = pd.read_csv(data_file)
+        messages_df = messages_df.sort_values("Main_server_timestamp")
         return {"messages": messages_df["Message"].to_list()}
     else:
         raise HTTPException(status_code=404, detail="Data file not found.")
@@ -175,7 +185,9 @@ if __name__ == "__main__":
     if not file_exists:
         with open(data_file, "a", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["Request_ID", "Timestamp", "Message"])
+            writer.writerow(
+                ["Request_ID", "Time_logged", "Main_server_timestamp", "Message"]
+            )
 
     logger = init_logger(args.server_name, "loggs")
     processed_requests_ids = set()
