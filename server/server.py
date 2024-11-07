@@ -70,9 +70,9 @@ async def store_message(request: Request):
     message = json_data["message"]
     write_concern = int(json_data.get("write_concern", 1))
 
-    logg_message = f"[{request_id}] - POST request: {message}"
-    if args.server_type == "main":
-        logg_message += f" Write concern: {write_concern}"
+    logg_message = (
+        f"[{request_id}] - POST request: {message}; Write concern: {write_concern}"
+    )
     logger.info(logg_message)
 
     data_entry = [request_id, datetime.now().isoformat(), message]

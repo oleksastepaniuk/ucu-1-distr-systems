@@ -58,7 +58,7 @@ if __name__ == "__main__":
 
     url = "http://127.0.0.1:8010/post_message"
     messages = [
-        f"Message {i}/{args.message_number};" for i in range(1, args.message_number + 1)
+        f"Message {i}/{args.message_number}" for i in range(1, args.message_number + 1)
     ]
 
     success_count = asyncio.run(
