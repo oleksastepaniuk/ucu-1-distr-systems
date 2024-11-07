@@ -1,5 +1,5 @@
 import argparse
-from time import sleep
+from time import time
 import aiohttp
 import asyncio
 from typing import List
@@ -61,10 +61,13 @@ if __name__ == "__main__":
         f"Message {i}/{args.message_number}" for i in range(1, args.message_number + 1)
     ]
 
+    start_time = time()
     success_count = asyncio.run(
         send_messages_concurrently(messages, url, args.concurrency, args.write_concern)
     )
-
-    print(
-        f"Write concern {args.write_concern}.\nSent {args.message_number} messages with {success_count} successes.\n{args.concurrency} simultaneous messages at a time."
-    )
+    elapsed_time = time() - start_time
+    message = f"Write concern {args.write_concern}."
+    message += f"\nSent {args.message_number} messages with {success_count} successes."
+    message += f"\n{args.concurrency} simultaneous messages at a time."
+    message += f"\nTime taken: {elapsed_time:.2f} sec."
+    print(message)
