@@ -12,50 +12,75 @@ import pandas as pd
 import sys
 import time
 import random
+from typing import Tuple
 
 sys.path.append("./")
 from utils.log_func import init_logger
 
 app = FastAPI()
 
+# Module-level set to keep references to tasks
+# need this to assure that the reamining backups are performed after write concern is met
+pending_tasks = set()
+
 
 async def backup_message(
     message: str,
-    session: aiohttp.ClientSession,
     url: str = "http://127.0.0.1:8010/post_message",
-) -> None:
+    backup_name: str = "backup_server_1",
+    port: int = 8011,
+) -> Tuple[bool, float, str, int]:
     try:
         start_time = time.time()
-        async with session.post(url, json={"message": message}) as response:
-            elapsed_time = time.time() - start_time
-            if response.status == 200:
-                return True, elapsed_time
-            else:
-                print(
-                    f"Failed to post message: {message}. Response status {response.status}"
-                )
-                return False, elapsed_time
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json={"message": message}) as response:
+                elapsed_time = time.time() - start_time
+                if response.status == 200:
+                    return True, elapsed_time, backup_name, port
+                else:
+                    print(
+                        f"Failed to post message: {message}. Response status {response.status}"
+                    )
+                    return False, elapsed_time, backup_name, port
     except aiohttp.ClientError as e:
         elapsed_time = time.time() - start_time
         print(f"Failed to connect. Message {message}, error - {e}")
-        return False, elapsed_time
+        return False, elapsed_time, backup_name, port
+
+
+async def send_backups_simple(message: str, request_id: str):
+    for backup_name, port in backup_server_dict.items():
+        url = f"http://{backup_name}:{port}/post_message"
+        print(f"Sending message to: {url}")
+        success, elapsed_time, backup_name, port = await backup_message(
+            message, url, backup_name, port
+        )
+        if success:
+            logger.info(
+                f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+            )
+        else:
+            logger.error(
+                f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+            )
 
 
 @app.post("/post_message")
 async def store_message(request: Request):
     json_data = await request.json()
     request_id = str(uuid.uuid4())
+    message = json_data["message"]
+    write_concern = int(json_data.get("write_concern", 1))
 
-    logg_message = f"[{request_id}] - POST request: {json_data['message']}"
+    logg_message = f"[{request_id}] - POST request: {message}"
     if args.server_type == "main":
-        write_concern = int(json_data.get("write_concern", 1))
         logg_message += f" Write concern: {write_concern}"
     logger.info(logg_message)
 
-    log_entry = [request_id, datetime.now().isoformat(), json_data["message"]]
+    data_entry = [request_id, datetime.now().isoformat(), message]
     with open(data_file, "a", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(log_entry)
+        writer.writerow(data_entry)
 
     if args.server_type == "main":
         # check if write concern can be satisfied
@@ -64,27 +89,65 @@ async def store_message(request: Request):
                 status_code=400,
                 detail=f"Too many backups required. Requested {write_concern}, available: {len(backup_server_dict) + 1}",
             )
-        async with aiohttp.ClientSession() as session:
+
+        if write_concern == 1:
+            asyncio.create_task(send_backups_simple(message, request_id))
+            logger.info(f"[{request_id}] - Write concern fulfilled. Returning 200")
+            return {"message": "Data received"}
+        else:
+            # write_concern > 1 wait for backups
+            num_successes_needed = write_concern - 1
+            num_successes = 0
+            backup_tasks = []
+
             for backup_name, port in backup_server_dict.items():
                 url = f"http://{backup_name}:{port}/post_message"
                 print(f"Sending message to: {url}")
-                success, elapsed_time = await backup_message(
-                    json_data["message"], session, url
+                task = asyncio.create_task(
+                    backup_message(message, url, backup_name, port)
                 )
-                if success:
-                    logger.info(
-                        f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-                    )
-                else:
+
+                # need this to assure that the reamining backups are performed after write concern is met
+                pending_tasks.add(task)
+                backup_tasks.append(task)
+                task.add_done_callback(lambda t: pending_tasks.discard(t))
+
+            # process tasks as they complete
+            for task in asyncio.as_completed(backup_tasks):
+                try:
+                    success, elapsed_time, backup_name, port = await task
+                    if success:
+                        num_successes += 1
+                        logger.info(
+                            f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+                        )
+                    else:
+                        logger.error(
+                            f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+                        )
+                except Exception as e:
                     logger.error(
-                        f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+                        f"[{request_id}] - Exception during backup to {backup_name}:{port}. Error: {e}"
                     )
+                if num_successes >= num_successes_needed:
+                    # Return response to client; remaining tasks will continue running
+                    logger.info(
+                        f"[{request_id}] - Write concern fulfilled. Returning 200"
+                    )
+                    return {"message": "Data received"}
+
+            logger.info(
+                f"[{request_id}] - Write concern failed: requested {write_concern}, managed {num_successes + 1}. Returning 500"
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to meet write concern: requested {write_concern}, managed {num_successes + 1}",
+            )
 
     elif args.server_type == "backup":
-        sleep_time = random.uniform(0, 5)
+        sleep_time = random.uniform(0, 10)
         await asyncio.sleep(sleep_time)
-
-    return {"message": "Data received"}
+        return {"message": "Data received"}
 
 
 @app.get("/get_messages")
