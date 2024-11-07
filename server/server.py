@@ -19,10 +19,6 @@ from utils.log_func import init_logger
 
 app = FastAPI()
 
-# Module-level set to keep references to tasks
-# need this to assure that the reamining backups are performed after write concern is met
-pending_tasks = set()
-
 
 async def backup_message(
     message: str,
@@ -50,7 +46,6 @@ async def backup_message(
 
 
 def on_task_done(task):
-    pending_tasks.discard(task)
     try:
         success, elapsed_time, backup_name, port, request_id = task.result()
 
@@ -103,9 +98,6 @@ async def store_message(request: Request):
             task = asyncio.create_task(
                 backup_message(message, url, backup_name, port, request_id)
             )
-
-            # need this to assure that the reamining backups are performed after write concern is met
-            pending_tasks.add(task)
             backup_tasks.append(task)
             task.add_done_callback(on_task_done)
 
