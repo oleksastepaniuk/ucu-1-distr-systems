@@ -30,7 +30,9 @@ async def backup_message(
     try:
         start_time = time.time()
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={"message": message}) as response:
+            async with session.post(
+                url, json={"message": message, "request_id": request_id}
+            ) as response:
                 elapsed_time = time.time() - start_time
                 if response.status == 200:
                     return True, elapsed_time, backup_name, port, request_id
@@ -66,7 +68,7 @@ def on_task_done(task):
 @app.post("/post_message")
 async def store_message(request: Request):
     json_data = await request.json()
-    request_id = str(uuid.uuid4())
+    request_id = json_data.get("request_id", str(uuid.uuid4()))
     message = json_data["message"]
     write_concern = int(json_data.get("write_concern", 1))
 
