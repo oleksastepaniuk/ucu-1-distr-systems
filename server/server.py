@@ -155,7 +155,7 @@ async def store_message(request: Request) -> Dict[str, str]:
 
 
 @app.get("/get_messages")
-async def reurn_messages() -> Dict[str, List[str]]:
+async def return_messages() -> Dict[str, List[str]]:
     if os.path.isfile(data_file):
         messages_df = pd.read_csv(data_file)
         messages_df = messages_df.sort_values("Main_server_timestamp")
