@@ -29,31 +29,32 @@ async def backup_message(
     url: str = "http://127.0.0.1:8010/post_message",
     backup_name: str = "backup_server_1",
     port: int = 8011,
-) -> Tuple[bool, float, str, int]:
+    request_id: str = "default_id",
+) -> Tuple[bool, float, str, int, str]:
     try:
         start_time = time.time()
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json={"message": message}) as response:
                 elapsed_time = time.time() - start_time
                 if response.status == 200:
-                    return True, elapsed_time, backup_name, port
+                    return True, elapsed_time, backup_name, port, request_id
                 else:
                     print(
                         f"Failed to post message: {message}. Response status {response.status}"
                     )
-                    return False, elapsed_time, backup_name, port
+                    return False, elapsed_time, backup_name, port, request_id
     except aiohttp.ClientError as e:
         elapsed_time = time.time() - start_time
         print(f"Failed to connect. Message {message}, error - {e}")
-        return False, elapsed_time, backup_name, port
+        return False, elapsed_time, backup_name, port, request_id
 
 
 async def send_backups_simple(message: str, request_id: str):
     for backup_name, port in backup_server_dict.items():
         url = f"http://{backup_name}:{port}/post_message"
         print(f"Sending message to: {url}")
-        success, elapsed_time, backup_name, port = await backup_message(
-            message, url, backup_name, port
+        success, elapsed_time, backup_name, port, request_id = await backup_message(
+            message, url, backup_name, port, request_id
         )
         if success:
             logger.info(
@@ -63,6 +64,25 @@ async def send_backups_simple(message: str, request_id: str):
             logger.error(
                 f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
             )
+
+
+def on_task_done(task):
+    pending_tasks.discard(task)
+    try:
+        success, elapsed_time, backup_name, port, request_id = task.result()
+
+        if success:
+            logger.info(
+                f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+            )
+        else:
+            logger.error(
+                f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+            )
+    except Exception as e:
+        logger.error(
+            f"[{request_id}] - Exception during backup to {backup_name}:{port}. Error: {e}"
+        )
 
 
 @app.post("/post_message")
@@ -104,31 +124,19 @@ async def store_message(request: Request):
                 url = f"http://{backup_name}:{port}/post_message"
                 print(f"Sending message to: {url}")
                 task = asyncio.create_task(
-                    backup_message(message, url, backup_name, port)
+                    backup_message(message, url, backup_name, port, request_id)
                 )
 
                 # need this to assure that the reamining backups are performed after write concern is met
                 pending_tasks.add(task)
                 backup_tasks.append(task)
-                task.add_done_callback(lambda t: pending_tasks.discard(t))
+                task.add_done_callback(on_task_done)
 
             # process tasks as they complete
             for task in asyncio.as_completed(backup_tasks):
-                try:
-                    success, elapsed_time, backup_name, port = await task
-                    if success:
-                        num_successes += 1
-                        logger.info(
-                            f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-                        )
-                    else:
-                        logger.error(
-                            f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"[{request_id}] - Exception during backup to {backup_name}:{port}. Error: {e}"
-                    )
+                success, _, _, _, _ = await task
+                if success:
+                    num_successes += 1
                 if num_successes >= num_successes_needed:
                     # Return response to client; remaining tasks will continue running
                     logger.info(
