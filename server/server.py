@@ -3,16 +3,19 @@ import aiohttp
 import asyncio
 import uvicorn
 from fastapi import FastAPI, Request, HTTPException
-import uuid
-from datetime import datetime
+
+from typing import Tuple, Dict, List
 import os
+import sys
+
 import csv
 import json
 import pandas as pd
-import sys
+
+from datetime import datetime
 from time import time
 import random
-from typing import Tuple, Dict
+import uuid
 
 sys.path.append("./")
 from utils.log_func import init_logger
@@ -37,45 +40,48 @@ async def backup_message(
                 if response.status == 200:
                     return True, elapsed_time, backup_name, port, request_id
                 else:
-                    print(
-                        f"Failed to post message: {message}. Response status {response.status}"
-                    )
                     return False, elapsed_time, backup_name, port, request_id
-    except aiohttp.ClientError as e:
+    except Exception as e:
         elapsed_time = time() - start_time
-        print(f"Failed to connect. Message {message}, error - {e}")
+        logger.error(
+            f"{request_id}] - Exception during backup to {backup_name}:{port}. Error: {e}."
+        )
         return False, elapsed_time, backup_name, port, request_id
 
 
 def on_task_done(task: asyncio.Task) -> None:
-    try:
-        success, elapsed_time, backup_name, port, request_id = task.result()
-
-        if success:
-            logger.info(
-                f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-            )
-        else:
-            logger.error(
-                f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-            )
-    except Exception as e:
+    success, elapsed_time, backup_name, port, request_id = task.result()
+    if success:
+        logger.info(
+            f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+        )
+    else:
         logger.error(
-            f"[{request_id}] - Exception during backup to {backup_name}:{port}. Error: {e}"
+            f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
+        )
+
+
+def validate_write_concern(write_concern: int, backups_available: int) -> None:
+    if write_concern < 1:
+        raise HTTPException(status_code=400, detail="write_concern must be at least 1.")
+    if write_concern - 1 > backups_available:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many backups required. Requested {write_concern}, available: {backups_available + 1}",
         )
 
 
 @app.post("/post_message")
-async def store_message(request: Request) -> Dict:
+async def store_message(request: Request) -> Dict[str, str]:
     json_data = await request.json()
     request_id = json_data.get("request_id", str(uuid.uuid4()))
     message = json_data["message"]
     write_concern = int(json_data.get("write_concern", 1))
 
-    logg_message = (
+    log_message = (
         f"[{request_id}] - POST request: {message}; Write concern: {write_concern}"
     )
-    logger.info(logg_message)
+    logger.info(log_message)
 
     data_entry = [request_id, datetime.now().isoformat(), message]
     with open(data_file, "a", newline="") as f:
@@ -83,12 +89,7 @@ async def store_message(request: Request) -> Dict:
         writer.writerow(data_entry)
 
     if args.server_type == "main":
-        # check if write concern can be satisfied
-        if write_concern - 1 > len(backup_server_dict):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Too many backups required. Requested {write_concern}, available: {len(backup_server_dict) + 1}",
-            )
+        validate_write_concern(write_concern, len(backup_server_dict))
 
         num_successes_needed = write_concern - 1
         num_successes = 0
@@ -104,7 +105,6 @@ async def store_message(request: Request) -> Dict:
             task.add_done_callback(on_task_done)
 
         if write_concern == 1:
-            # Return response to client; remaining tasks will continue running
             logger.info(f"[{request_id}] - Write concern fulfilled. Returning 200")
             return {"message": "Data received"}
 
@@ -114,11 +114,10 @@ async def store_message(request: Request) -> Dict:
             if success:
                 num_successes += 1
             if num_successes >= num_successes_needed:
-                # Return response to client; remaining tasks will continue running
                 logger.info(f"[{request_id}] - Write concern fulfilled. Returning 200")
                 return {"message": "Data received"}
 
-        logger.info(
+        logger.error(
             f"[{request_id}] - Write concern failed: requested {write_concern}, managed {num_successes + 1}. Returning 500"
         )
         raise HTTPException(
@@ -133,7 +132,7 @@ async def store_message(request: Request) -> Dict:
 
 
 @app.get("/get_messages")
-async def reurn_messages() -> Dict:
+async def reurn_messages() -> Dict[str, List[str]]:
     if os.path.isfile(data_file):
         messages_df = pd.read_csv(data_file)
         return {"messages": messages_df["Message"].to_list()}
