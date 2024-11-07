@@ -71,6 +71,16 @@ def validate_write_concern(write_concern: int, backups_available: int) -> None:
         )
 
 
+def prevent_request_duplicates(request_id: str):
+    global processed_requests_ids
+
+    if request_id in processed_requests_ids:
+        return True
+
+    processed_requests_ids.add(request_id)
+    return False
+
+
 @app.post("/post_message")
 async def store_message(request: Request) -> Dict[str, str]:
     json_data = await request.json()
@@ -83,10 +93,14 @@ async def store_message(request: Request) -> Dict[str, str]:
     )
     logger.info(log_message)
 
-    data_entry = [request_id, datetime.now().isoformat(), message]
-    with open(data_file, "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(data_entry)
+    if prevent_request_duplicates(request_id):
+        logger.info(f"[{request_id}] - Duplicate request received. Ignoring.")
+        return {"message": "Duplicate message ignored."}
+    else:
+        data_entry = [request_id, datetime.now().isoformat(), message]
+        with open(data_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(data_entry)
 
     if args.server_type == "main":
         validate_write_concern(write_concern, len(backup_server_dict))
@@ -164,6 +178,7 @@ if __name__ == "__main__":
             writer.writerow(["Request_ID", "Timestamp", "Message"])
 
     logger = init_logger(args.server_name, "loggs")
+    processed_requests_ids = set()
 
     if args.server_type == "main":
         with open("backup_servers.json", "r") as f:
