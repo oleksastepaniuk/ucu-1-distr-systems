@@ -49,23 +49,6 @@ async def backup_message(
         return False, elapsed_time, backup_name, port, request_id
 
 
-async def send_backups_simple(message: str, request_id: str):
-    for backup_name, port in backup_server_dict.items():
-        url = f"http://{backup_name}:{port}/post_message"
-        print(f"Sending message to: {url}")
-        success, elapsed_time, backup_name, port, request_id = await backup_message(
-            message, url, backup_name, port, request_id
-        )
-        if success:
-            logger.info(
-                f"[{request_id}] - Backed up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-            )
-        else:
-            logger.error(
-                f"[{request_id}] - Failed to back up message to {backup_name}:{port}. Time taken: {elapsed_time:.2f} sec"
-            )
-
-
 def on_task_done(task):
     pending_tasks.discard(task)
     try:
@@ -110,47 +93,44 @@ async def store_message(request: Request):
                 detail=f"Too many backups required. Requested {write_concern}, available: {len(backup_server_dict) + 1}",
             )
 
+        num_successes_needed = write_concern - 1
+        num_successes = 0
+        backup_tasks = []
+
+        for backup_name, port in backup_server_dict.items():
+            url = f"http://{backup_name}:{port}/post_message"
+            print(f"Sending message to: {url}")
+            task = asyncio.create_task(
+                backup_message(message, url, backup_name, port, request_id)
+            )
+
+            # need this to assure that the reamining backups are performed after write concern is met
+            pending_tasks.add(task)
+            backup_tasks.append(task)
+            task.add_done_callback(on_task_done)
+
         if write_concern == 1:
-            asyncio.create_task(send_backups_simple(message, request_id))
+            # Return response to client; remaining tasks will continue running
             logger.info(f"[{request_id}] - Write concern fulfilled. Returning 200")
             return {"message": "Data received"}
-        else:
-            # write_concern > 1 wait for backups
-            num_successes_needed = write_concern - 1
-            num_successes = 0
-            backup_tasks = []
 
-            for backup_name, port in backup_server_dict.items():
-                url = f"http://{backup_name}:{port}/post_message"
-                print(f"Sending message to: {url}")
-                task = asyncio.create_task(
-                    backup_message(message, url, backup_name, port, request_id)
-                )
+        # process tasks as they complete
+        for task in asyncio.as_completed(backup_tasks):
+            success, _, _, _, _ = await task
+            if success:
+                num_successes += 1
+            if num_successes >= num_successes_needed:
+                # Return response to client; remaining tasks will continue running
+                logger.info(f"[{request_id}] - Write concern fulfilled. Returning 200")
+                return {"message": "Data received"}
 
-                # need this to assure that the reamining backups are performed after write concern is met
-                pending_tasks.add(task)
-                backup_tasks.append(task)
-                task.add_done_callback(on_task_done)
-
-            # process tasks as they complete
-            for task in asyncio.as_completed(backup_tasks):
-                success, _, _, _, _ = await task
-                if success:
-                    num_successes += 1
-                if num_successes >= num_successes_needed:
-                    # Return response to client; remaining tasks will continue running
-                    logger.info(
-                        f"[{request_id}] - Write concern fulfilled. Returning 200"
-                    )
-                    return {"message": "Data received"}
-
-            logger.info(
-                f"[{request_id}] - Write concern failed: requested {write_concern}, managed {num_successes + 1}. Returning 500"
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to meet write concern: requested {write_concern}, managed {num_successes + 1}",
-            )
+        logger.info(
+            f"[{request_id}] - Write concern failed: requested {write_concern}, managed {num_successes + 1}. Returning 500"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to meet write concern: requested {write_concern}, managed {num_successes + 1}",
+        )
 
     elif args.server_type == "backup":
         sleep_time = random.uniform(0, 10)
